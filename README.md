@@ -29,13 +29,13 @@ Raft ensures that there is only one leader at a time.
 ### How to run
 raft.go has function New_raft(id,majority,peers file,raft conf file) which takes input the id number of server, majority value, peers file name for initializing the cluster, and raft conf file name
 
-type Raft interface{.
-    Id() int -returns the Id of node.
-    Term()     int  -returns the term id.
-    isLeader() bool.
-    Quit() .
-    Start().
-}.
+type Raft interface 
+    Id() int -returns the Id of node
+    Term()     int  -returns the term id
+    isLeader() bool
+    Quit() 
+    Start()
+
 
 Now after making raft nodes we can close and again start the server using Quit() and Start() functions.
 By giving delay between start and close we can see who is leader after each close and start using isLeader() fucntion.
