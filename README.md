@@ -30,8 +30,8 @@ Raft ensures that there is only one leader at a time.
 raft.go has function New_raft(id,majority,peers file,raft conf file) which takes input the id number of server, majority value, peers file name for initializing the cluster, and raft conf file name
 
 type Raft interface{
-    Id() int //returns the Id of node
-    Term()     int  //returns the term id
+    Id() int -returns the Id of node
+    Term()     int  -returns the term id
     isLeader() bool
     Quit() 
     Start()
