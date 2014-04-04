@@ -25,10 +25,12 @@ type Packet struct{
 }
 
 type Raft interface{
+	Id() int
     Term()     int
     isLeader() bool
     Quit() 
     Start()
+    Reset()	//resets the server node to follower
 }
 
 
@@ -42,6 +44,8 @@ type Node struct{
 	HeartBT int		//heartbeat time in millisec
 	Majority int //Majority value
 	Close chan bool //channel by which raft node is closed
+	ES int 		//electout start
+	EN int		//electout end
 }
 type jsonobject struct {
     EToutStart int 
@@ -53,12 +57,23 @@ type jsonobject struct {
 func (n Node) Term() int {
    return n.CurrentTerm
 } 
+func (n Node) Reset(){
+   n.L=false
+   n.State="Follower"
+}
+func (n Node) Id() int {
+   return n.Snode.Pid()
+} 
 func (n Node) isLeader() bool {
    return n.L
 } 
 
 //quite the raft server node
 func (n Node) Quit() {
+	n.CurrentTerm = 0
+	n.VotedFor =0
+	n.L=false
+	n.State="Follower"
 	n.Close <- true
 }
 
@@ -70,8 +85,8 @@ func (n Node) Start() {
 	//n.State = "Follower"
 	//SNode:=cluster.New(n.Snode.Pid(),clus_conf)
     //mynode := Node{SNode,0,0,false,"Follower",random(ES,EN),HB,maj,make(chan bool)}
-    New_raft(n.Snode.Pid(),n.Majority,"peers.json","raft_conf.json")
-    //go start_ser(&n)
+    //New_raft(n.Snode.Pid(),n.Majority,"peers.json","raft_conf.json")
+    go start_ser(&n)
 }
 
 func Leader(n *Node){
@@ -85,7 +100,7 @@ func Leader(n *Node){
 					//if Term is greater than CurrentTerm, then sitdown and become follower
 					if n.CurrentTerm < dat.Term{
 						//set the current id
-						println("Term ",n.CurrentTerm," Leader ",n.Snode.Pid()," received ReqV from ",dat.Id, " whose Term is ",dat.Term)
+						//println("Term ",n.CurrentTerm," Leader ",n.Snode.Pid()," received ReqV from ",dat.Id, " whose Term is ",dat.Term)
 						n.CurrentTerm=dat.Term
 						//no more leader
 						n.L=false
@@ -93,8 +108,8 @@ func Leader(n *Node){
 						n.State="Follower"
 					}
 				default:
-					println("Term ",n.CurrentTerm," Leader ",n.Snode.Pid()," received Garbage RPC")
-					println(dat.Type)
+					//println("Term ",n.CurrentTerm," Leader ",n.Snode.Pid()," received Garbage RPC",dat.Type)
+					//println(dat.Type)
 			} 
 		//after timeout of heartbeat send appendentries to all
        case <- time.After(time.Duration(n.HeartBT)*time.Millisecond): 
@@ -113,58 +128,59 @@ func Follower(n *Node) {
 			var dat Packet
 			json.Unmarshal(envelope.Msg.([]byte),&dat)
            	switch dat.Type { 
-			default:
-				println("Term ",n.CurrentTerm," Follower ",n.Snode.Pid()," received Garbage RPC ")
-			//if request vote then see if already voted than simply send the id to which voted else check the current Term and give vote
-			case "RequestVote":
-				//if nil then give vote	
-				if n.VotedFor==0{
-					//if Term is greater than CurrentTerm then only give vote
-					if n.CurrentTerm < dat.Term{
+				default:
+					//println("Term ",n.CurrentTerm," Follower ",n.Snode.Pid()," received Garbage RPC ")
+				//if request vote then see if already voted than simply send the id to which voted else check the current Term and give vote
+				case "RequestVote":
+					//if nil then give vote	
+					if n.VotedFor==0{
+						//if Term is greater than CurrentTerm then only give vote
+						if n.CurrentTerm < dat.Term{
 					
-						//set the current id
-						println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," received ReqV from ",dat.Id," whose Term is ",dat.Term)
-						n.CurrentTerm=dat.Term
-						n.VotedFor=dat.Id
-						println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," Voted for ",dat.Id," whose Term is ",dat.Term)
-						//creating a responce vote envelope and sending back with the id whom the vote is given
-						rv:=Packet{n.CurrentTerm,n.Snode.Pid(),0,n.VotedFor,"ResponceVote"}
-						b, _ := json.Marshal(rv)
-						n.Snode.Outbox()<-&cluster.Envelope{Pid:dat.Id, Msg:b}
-					}
-				}else{
-					//if Term is greater than CurrentTerm then only give vote
-					if n.CurrentTerm < dat.Term{
-						
-						//set the current id
-						println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," received ReqV from ",dat.Id," whose Term is ",dat.Term)
-						n.CurrentTerm=dat.Term
-						n.VotedFor=dat.Id
-						println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," Voted for ",dat.Id," whose Term is ",dat.Term)
-						//creating a responce vote envelope and sending back with the id whom the vote is given
-						rv:=Packet{n.CurrentTerm,n.Snode.Pid(),0,n.VotedFor,"ResponceVote"}
-						b, _ := json.Marshal(rv)
-						n.Snode.Outbox()<-&cluster.Envelope{Pid:dat.Id, Msg:b}
-						
-					}else{
-						if n.CurrentTerm == dat.Term{
-							println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," received ReqV ",dat.Id," whose Term is ",dat.Term)
-							println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," Voted for ",n.VotedFor," whose Term is ",dat.Term)
+							//set the current id
+							//println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," received ReqV from ",dat.Id," whose Term is ",dat.Term)
+							n.CurrentTerm=dat.Term
+							n.VotedFor=dat.Id
+							//println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," Voted for ",dat.Id," whose Term is ",dat.Term)
 							//creating a responce vote envelope and sending back with the id whom the vote is given
 							rv:=Packet{n.CurrentTerm,n.Snode.Pid(),0,n.VotedFor,"ResponceVote"}
 							b, _ := json.Marshal(rv)
-							n.Snode.Outbox()<-&cluster.Envelope{Pid:dat.Id, Msg: b}					
+							n.Snode.Outbox()<-&cluster.Envelope{Pid:dat.Id, Msg:b}
+						}
+					}else{
+						//if Term is greater than CurrentTerm then only give vote
+						if n.CurrentTerm < dat.Term{
+						
+							//set the current id
+							//println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," received ReqV from ",dat.Id," whose Term is ",dat.Term)
+							n.CurrentTerm=dat.Term
+							n.VotedFor=dat.Id
+							//println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," Voted for ",dat.Id," whose Term is ",dat.Term)
+							//creating a responce vote envelope and sending back with the id whom the vote is given
+							rv:=Packet{n.CurrentTerm,n.Snode.Pid(),0,n.VotedFor,"ResponceVote"}
+							b, _ := json.Marshal(rv)
+							n.Snode.Outbox()<-&cluster.Envelope{Pid:dat.Id, Msg:b}
+						
+						}else{
+							if n.CurrentTerm == dat.Term{
+								//println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," received ReqV ",dat.Id," whose Term is ",dat.Term)
+								//println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," Voted for ",n.VotedFor," whose Term is ",dat.Term)
+								//creating a responce vote envelope and sending back with the id whom the vote is given
+								rv:=Packet{n.CurrentTerm,n.Snode.Pid(),0,n.VotedFor,"ResponceVote"}
+								b, _ := json.Marshal(rv)
+								n.Snode.Outbox()<-&cluster.Envelope{Pid:dat.Id, Msg: b}					
+							}
 						}
 					}
-				}
-			//if appendenrty do nothing only set the current Term
-			case "AppendEntries":
-				println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," received AE from ",dat.LeaderId," whose Term is ",dat.Term)
-				n.CurrentTerm=dat.Term
+				//if appendenrty do nothing only set the current Term
+				case "AppendEntries":
+					//println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," received AE from ",dat.LeaderId," whose Term is ",dat.Term)
+					n.CurrentTerm=dat.Term
 			}
 		//if election timeout then become candidate		
        	case <- time.After(time.Duration(n.ElecTout) * time.Millisecond): 
-       		println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," became candidate because of timeout")
+       		n.ElecTout=random(n.ES,n.EN)
+       		//println("Term ",n.CurrentTerm," server ",n.Snode.Pid()," became candidate because of timeout")
        		n.State="Candidate"
    	}
    	return 
@@ -175,70 +191,78 @@ func Candidate(n *Node){
 	//vote for self
 	n.VotedFor=n.Snode.Pid()
 	//send RV_RPC
-	println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," sending ReqV")
-	//println("C",n.current)
+	//println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," sending ReqV")
 	RV:=Packet{Term:n.CurrentTerm,Id:n.Snode.Pid(),VotedId:n.VotedFor,Type:"RequestVote"}
 	b2, err1 := json.Marshal(RV)
 	if err1 != nil {
-		println("candidate error:", err1)
+		//println("candidate marshal error:", err1)
 	}
-	var dat1 Packet
-	json.Unmarshal(b2,&dat1)
+
     n.Snode.Outbox()<-&cluster.Envelope{Pid:-1, Msg: b2}
     var votes int
-    votes=0
+    votes=1
 	for{
-	//if Majority votes comes then the candidate became leader  
-	if votes >=n.Majority{
-			//Majority votes so become leader
-			n.State="Leader"
-			println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," became leader")
-			n.L=true
-			return
-	}
-	select {	
-       case envelope := <- n.Snode.Inbox(): 
-       		//decoding the envelope
-			var dat Packet
-			json.Unmarshal(envelope.Msg.([]byte),&dat)
-           	switch dat.Type { 
-				default:
-					println("Term ",n.CurrentTerm," Candidate ",n.Snode.Pid()," received Garbage RPC")
-					return 
-				case "RequestVote":
-					//request came from same Term but diff candidate
-					if n.CurrentTerm == dat.Term{
-						println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," received ReqV from ",dat.Id," whose Term is ",dat.Term)
-						//creating a responce vote envelope and sending back with the id whom the vote is given
-						rv:=Packet{n.CurrentTerm,n.Snode.Pid(),0,n.VotedFor,"ResponceVote"}
-						b, _ := json.Marshal(rv)
-						n.Snode.Outbox()<-&cluster.Envelope{Pid:dat.Id, Msg:b}
-					}
-				case "ResponceVote":
-				//if anybody with same Term number voted then increment the count of vote
-					if n.CurrentTerm==dat.Term{
-						if dat.VotedId==n.Snode.Pid(){
-							println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," received a vote ")
-							votes=votes+1
+		//if Majority votes comes then the candidate became leader  
+		if votes >=n.Majority{
+				//Majority votes so become leader
+				n.State="Leader"
+				println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," became leader")
+				n.L=true
+				return
+		}
+		select {	
+		   case envelope := <- n.Snode.Inbox(): 
+		   		//decoding the envelope
+				var dat Packet
+				json.Unmarshal(envelope.Msg.([]byte),&dat)
+		       	switch dat.Type { 
+					default:
+						//println("Term ",n.CurrentTerm," Candidate ",n.Snode.Pid()," received Garbage RPC")
+						return 
+					case "RequestVote":
+						//request came from same Term but diff candidate
+						if n.CurrentTerm == dat.Term{
+							//println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," received ReqV from ",dat.Id," whose Term is ",dat.Term)
+							//creating a responce vote envelope and sending back with the id whom the vote is given
+							rv:=Packet{n.CurrentTerm,n.Snode.Pid(),0,n.VotedFor,"ResponceVote"}
+							b, _ := json.Marshal(rv)
+							n.Snode.Outbox()<-&cluster.Envelope{Pid:dat.Id, Msg:b}
+						//if higher term requests for vote than convert to follower
+						}else if n.CurrentTerm < dat.Term{
+							//println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," became follower")
+							n.State="Follower"
+							n.CurrentTerm=dat.Term
+							return					
 						}
-					}
-				case "AppendEntries":
-				//if any append entry with >= Term comes then someone has become leader so sit down
-					if dat.Term >= n.CurrentTerm{
-						println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," received AE from ",dat.LeaderId," whose Term is ",dat.Term)
-						println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," became follower")
-						n.State="Follower"
-						n.CurrentTerm=dat.Term
-						return
-					}
-			}			
+					
+					case "ResponceVote":
+					//if anybody with same Term number voted then increment the count of vote
+						if n.CurrentTerm==dat.Term{
+							if dat.VotedId==n.Snode.Pid(){
+								//println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," received a vote ")
+								votes=votes+1
+							}
+						}
+					case "AppendEntries":
+					//if any append entry with >= Term comes then someone has become leader so sit down
+						if dat.Term >= n.CurrentTerm{
+							//println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," received AE from ",dat.LeaderId," whose Term is ",dat.Term)
+							//println("Term ",n.CurrentTerm," candidate ",n.Snode.Pid()," became follower")
+							n.State="Follower"
+							n.CurrentTerm=dat.Term
+							return
+						}
+				}			
 				
 				
-       case <- time.After(time.Duration(n.ElecTout) * time.Millisecond): 
-       		n.State="Candidate"
-       		println("candidate timeout")
-       		return 
-   		}
+		   case <- time.After(time.Duration(n.ElecTout) * time.Millisecond): 
+		   		n.State="Candidate"
+		   		//n.CurrentTerm=n.CurrentTerm+1
+		   		//println(n.Snode.Pid(), " candidate timeout")
+		   		n.ElecTout = random(n.ES,n.EN)
+		   		//break
+		   		return 
+	   		}
    	}
    	return 
 }
@@ -254,13 +278,13 @@ func New_raft(id int,maj int,clus_conf string,raft_conf string) *Node{
     json.Unmarshal(file,&jsontype)
     
     //fetching election_timeout heartbeat_timeout and Majority value
-    ES:=jsontype.EToutStart
-    EN:=jsontype.EToutEnd
+    ES := jsontype.EToutStart
+    EN := jsontype.EToutEnd
     HB:=jsontype.HTout
     
     //making a server node
     SNode:=cluster.New(id,clus_conf)
-    mynode := Node{SNode,0,0,false,"Follower",random(ES,EN),HB,maj,make(chan bool)}
+    mynode := Node{SNode,0,0,false,"Follower",random(ES,EN),HB,maj,make(chan bool),ES,EN}
 
     go start_ser(&mynode)
     return &mynode
@@ -271,7 +295,8 @@ func start_ser(n *Node){
 			select {
 				case msg := <-n.Close:
 					if msg == true {
-						println("server ",n.Snode.Pid()," closed")
+						n.L=false
+						//println("server ",n.Snode.Pid()," closed")
 						return						
 					}
 				default:
@@ -283,7 +308,7 @@ func start_ser(n *Node){
 						case "Candidate":
 							Candidate(n)
 						default:
-								println("unrecognized State")
+								//println("unrecognized State")
 						}
 			}
 	}
