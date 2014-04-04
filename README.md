@@ -35,10 +35,14 @@ raft.go has function New_raft(id,majority,peers file,raft conf file) which takes
     - isLeader() bool
     - Quit() 
     - Start()
+    - Reset() //for reseting the server to follower
 
 
 Now after making raft nodes we can close and again start the server using Quit() and Start() functions.
+Reset the node to follower by Reset() function 
 By giving delay between start and close we can see who is leader after each close and start using isLeader() fucntion.
+
+raft_test.go is a sample test file which is documented.
 
 The code is documented for more details.
 
